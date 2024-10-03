@@ -5,21 +5,57 @@
   so many projects will want to ingest schema data from it.
 
   To use this namespace, `datomic.client.api` must be on your classpath."
-  (:require [datomic.client.api :as d]
-            [schema-voyager.ingest.core :as ingest]
-            [clojure.set :as set]))
+  (:require 
+   [clojure.core.protocols]
+   [clojure.core.reducers :as r]
+   [clojure.walk :refer [postwalk]]
+   [datomic.api :as d]
+   [environ.core :refer [env]]
+   [schema-voyager.ingest.core :as ingest]
+   [clojure.set :as set])
+  (:import
+   (java.util.concurrent BlockingQueue)
+   (java.net URLEncoder))) 
+
+(defn- bq-seq
+  "Creates a lazyseq out of a java.util.concurrent.BlockingQueue"
+  [q]
+  (->> q
+       ((fn tx-queue-stream-seq--fn [^BlockingQueue bq]
+          (lazy-seq
+            (cons
+              (.take bq)
+              (tx-queue-stream-seq--fn bq)))))))
+
+(extend-protocol clojure.core.protocols/CollReduce
+
+  BlockingQueue
+  (coll-reduce [^BlockingQueue bq rf init] ; make BlockingQueue a reducible
+    (r/reduce rf init (bq-seq bq))))
 
 (defn- lift-ident [item k]
   (cond-> item
     (contains? item k) (update k :db/ident)))
 
+(defn gen-db-uri []
+  (format "datomic:dev://%s:%s/%s?password=%s"
+          (URLEncoder/encode (env :datomic-txr-host "localhost"))
+          (URLEncoder/encode (env :datomic-txr-port "4334")) ; BEWARE: URLEncoder/encode only accepts strings for arguments.
+          (URLEncoder/encode (env :datomic-db-name "metta"))
+          (URLEncoder/encode (env :datomic-txr-storage-datomic-password "changeit"))))
+
 (defn datomic-db
   "Get the current value of the Datomic db `db-name`, using a client described
   by `client-config`."
-  [client-config db-name]
-  (let [client (d/client client-config)
-        conn   (d/connect client {:db-name db-name})]
+  [uri]
+  (let [conn (d/connect (or uri (gen-db-uri)))]
     (d/db conn)))
+
+(defn datomic-conn
+  "Get the current value of the Datomic db `db-name`, using a client described
+  by `client-config`."
+  [uri]
+  (d/connect (or uri (gen-db-uri))))
 
 (def datomic-coll-exclusions
   "These are collections installed by Datomic itself, as of release 480-8770.
@@ -40,6 +76,9 @@
     #schema/enum :db.type
     #schema/enum :db.unique
     #schema/enum :db})
+
+
+;; (re-matches #"^\d.*" (name (keyword "abc" "31-365-days")))
 
 (defn excluded-attr?
   "Individual attributes can be ignored by including their :db/ident in
@@ -64,28 +103,35 @@
   [[excluded-attr?]]."
   ([db] (ingest db {}))
   ([db exclusions]
-   (->> (d/q '[:find (pull ?e [*])
+   (->> (d/q '[:find [(pull ?e [*]) ...] 
                :where [?e :db/ident]]
              db)
-        (map first)
+        (remove #(:db/fn %))
+        (remove #(re-matches #"^\d.*" (name (:db/ident %))))
         (map #(-> %
-                  (dissoc :db/id)
-                  (lift-ident :db/valueType)
-                  (lift-ident :db/cardinality)
-                  (lift-ident :db/unique)))
-        (remove #(excluded-attr? % exclusions)))))
+                  (dissoc :db/id)))
+        (remove #(excluded-attr? % exclusions))
+        (postwalk
+          (fn [x]
+            (cond
+              (:db/id x)
+              (if-let [{:keys [db/ident]} (d/entity db (:db/id x))]
+                {:db/ident ident}
+                x)
+
+              :else x))))))
 
 (def ^:private reference-rules
   '[[(referred-attr-from-entity [?referred-e] ?referred-attr)
      (or
-      ;; attribute
-      (and
-       [(missing? $ ?referred-e :db/ident)]
-       [?referred-e ?referred-attr])
-      ;; constant
-      (and
-       [?referred-e :db/ident]
-       [(identity ?referred-e) ?referred-attr]))]])
+       ;; attribute
+       (and
+         [(missing? $ ?referred-e :db/ident)]
+         [?referred-e ?referred-attr])
+       ;; constant
+       (and
+         [?referred-e :db/ident]
+         [(identity ?referred-e) ?referred-attr]))]])
 
 (defn- references-from-attrs [exclusions attr-pairs]
   (->> attr-pairs
@@ -235,12 +281,12 @@
                              :where
                              [?attr :db/ident]
                              (or
-                              ;; attribute
-                              (and [?attr :db/valueType]
-                                   [_ ?attr])
-                              ;; constant
-                              (and [(missing? $ ?attr :db/valueType)]
-                                   [_ _ ?attr]))]
+                               ;; attribute
+                               (and [?attr :db/valueType]
+                                    [_ ?attr])
+                               ;; constant
+                               (and [(missing? $ ?attr :db/valueType)]
+                                    [_ _ ?attr]))]
                            db)
                       (map first)
                       set)]
@@ -262,18 +308,18 @@
   [db infer]
   (let [infer (set infer)]
     (vec
-     (concat (when (some infer #{:all :deprecations})
-               (infer-deprecations db))
-             (when (some infer #{:all :references :plain-references})
-               (infer-plain-references db))
-             (when (some infer #{:all :references :tuple-references :homogeneous-tuple-references})
-               (infer-homogeneous-tuple-references db))
-             (when (some infer #{:all :references :tuple-references :heterogeneous-tuple-references})
-               (infer-heterogeneous-tuple-references db))))))
+      (concat (when (some infer #{:all :deprecations})
+                (infer-deprecations db))
+              (when (some infer #{:all :references :plain-references})
+                (infer-plain-references db))
+              (when (some infer #{:all :references :tuple-references :homogeneous-tuple-references})
+                (infer-homogeneous-tuple-references db))
+              (when (some infer #{:all :references :tuple-references :heterogeneous-tuple-references})
+                (infer-heterogeneous-tuple-references db))))))
 
 (defn- db-from-source
-  [{:keys [client-config db-name]}]
-  (datomic-db client-config db-name))
+  [{:keys [uri]}]
+  (datomic-db uri))
 
 #_{:clj-kondo/ignore #{:clojure-lsp/unused-public-var}}
 (defn cli-ingest
@@ -283,11 +329,17 @@
 
   Before calling with the `infer` param, see the warnings in the [inference
   docs](/doc/datomic-inference.md)."
-  {:arglists '([{:keys [client-config db-name infer exclusions]}])}
-  [{:keys [exclusions] inferences :infer :as source}]
-  (let [db (db-from-source source)]
-    (concat (ingest db exclusions)
-            (infer db inferences))) )
+  {:arglists '([{:keys [uri infer exclusions tail?]}])}
+  [{:keys [exclusions tail? :datomic/uri] inferences :infer :as source}]
+
+  (let [conn (d/connect (or uri (gen-db-uri)))]
+    (if tail?
+      (throw (UnsupportedOperationException. "not implemented"))
+      
+
+      (let [db (d/db conn)]
+        (concat (ingest db exclusions)
+                (infer db inferences))))) )
 
 #_{:clj-kondo/ignore #{:clojure-lsp/unused-public-var}}
 (defn cli-inferences
@@ -297,7 +349,7 @@
 
   Specify what you would like to `infer`, as explained in the [inference
   docs](/doc/datomic-inference.md), heeding the warnings there."
-  {:arglists '([{:keys [client-config db-name infer]}])}
+  {:arglists '([{:keys [uri infer]}])}
   [{inferences :infer :as source}]
   (infer (db-from-source source) inferences) )
 
@@ -307,6 +359,24 @@
   [[datomic-db]]) and extracting installed attributes (with [[ingest]]).
 
   See [[excluded-attr?]] for information about how to use `exclusions`."
-  {:arglists '([{:keys [client-config db-name exclusions]}])}
+  {:arglists '([{:keys [uri db-name exclusions]}])}
   [{:keys [exclusions] :as source}]
   (ingest (db-from-source source) exclusions) )
+
+
+;; -------------------------------------------------------------------------------------------------------------
+;; -------------------------------------------------------------------------------------------------------------
+;; -------------------------------------------------------------------------------------------------------------
+#_ (let [q  (d/tx-report-queue conn)
+         db (d/db conn)]
+
+     ;; initial ingest
+     (concat (ingest db exclusions)
+             (infer db inferences))
+
+     (->> q
+          (run! (fn [_]
+
+
+                  ))
+          ))

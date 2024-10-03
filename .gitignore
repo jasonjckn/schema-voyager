@@ -14,3 +14,6 @@ schema-voyager.html
 _site
 resources/standalone-template.html
 .java-version
+.clj-kondo/
+.lsp/.cache/
+out.edn

@@ -1,6 +1,8 @@
 (ns schema-voyager.db.init
   "Transact ingested schema data into a DataScript DB."
-  (:require [datascript.core :as ds]))
+  (:require
+   [clojure.pprint]
+   [datascript.core :as ds]))
 
 (def metaschema
   "Definition of the supplemental attributes that can be transacted into the
@@ -33,4 +35,5 @@
   "Transacts data processed by [[schema-voyager.ingest.core/process]] into a new
   DataScript DB."
   [data]
+  (spit "out.edn" (with-out-str (clojure.pprint/pprint data)) )
   (ds/db-with (ds/empty-db metaschema) data))

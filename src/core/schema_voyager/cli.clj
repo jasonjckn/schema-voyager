@@ -11,11 +11,10 @@
    [schema-voyager.ingest.api :as ingest]
    [schema-voyager.template.standalone :as template.standalone]))
 
-(defn- datomic-config [{:keys [datomic/db-name datomic/client-config datomic/exclusions datomic/infer]}]
-  {:db-name       db-name
-   :client-config client-config
-   :exclusions    exclusions
-   :infer         infer})
+(defn- datomic-config [{:keys [datomic/uri datomic/exclusions datomic/infer]}]
+  {:uri        uri
+   :exclusions exclusions
+   :infer      infer})
 
 (defn- extract-datomic [params]
   (ingest/datomic (datomic-config params)))
@@ -31,11 +30,11 @@
 
 (defn- extract-source [source]
   (cond
-    (:datomic/db-name source) (extract-datomic source)
-    (:file/name source)       (extract-file source)
-    (:fn/name source)         (extract-fn source)
-    (:static/data source)     (extract-static source)
-    :else                     (throw (ex-info "Unrecognized source" {:source source}))))
+    (:datomic/uri source) (extract-datomic source)
+    (:file/name source)   (extract-file source)
+    (:fn/name source)     (extract-fn source)
+    (:static/data source) (extract-static source)
+    :else                 (throw (ex-info "Unrecognized source" {:source source}))))
 
 (defn ingest-into-db
   "Create an in-memory DataScript DB from the `sources`. Does not persist the

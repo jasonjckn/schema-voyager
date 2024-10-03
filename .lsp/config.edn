@@ -1,1 +1,43 @@
-{:source-paths #{"src/core" "src/web" "src/build" "release.clj"}}
+;;
+;;
+;; LSP Config EDN
+;; -----------------------------------------------------------------------------------------------------------
+
+
+;; -----------------------------------------------------------------------------------------------------------
+;;   References:
+;;      - https://clojure-lsp.io/settings/
+;;
+{:source-paths                #{"src/core" "src/web" "src/build" "release.clj"}
+ :source-aliases              #{:datomic}
+ ;;
+ :auto-add-ns-to-new-files?   false
+ :keep-parens-when-threading? true
+ :copy-kondo-configs?         true
+ :semantic-tokens?            false
+ :completion                  {:analysis-type :slow-but-accurate}
+ :java                        {:download-jdk-source? true}
+ :stubs                       {:generation {:namespaces #{"datomic.api"}}}
+ :clean                       {:automatically-after-ns-refactor true
+                               :ns-inner-blocks-indentation     :next-line
+                               :ns-import-classes-indentation   :next-line
+                               :sort                            {:ns             true
+                                                                 :require        true
+                                                                 :import         true
+                                                                 :import-classes {:classes-per-line 3} ;; -1 for all in single line
+                                                                 :refer          {:max-line-length 110}}}
+ }
+
+
+
+;; -----------------------------------------------------------------------------------------------------------
+;; -----------------------------------------------------------------------------------------------------------
+;; Developer Notes
+;;
+
+;; :project-specs             [{:project-path  "deps.edn"
+;;                              :classpath-cmd ["clojure" "-A:repl:test:build:+repl" "-Spath"]}]
+;; :linters                   {:clj-kondo {:level             :on
+;;                                         :report-duplicates false
+;;                                         :ns-exclude-regex  "dev|user"
+;;                                         }}

@@ -1,5 +1,8 @@
-{:paths   ["src/core" "resources"]
- :deps    {datascript/datascript {:mvn/version "1.2.1"}}
+{:paths ["src/core" "resources"]
+ :deps  {
+         org.clojure/clojure   {:mvn/version "1.12.0"}
+         datascript/datascript {:mvn/version "1.2.1"}}
+
  :aliases {:cljs           {:extra-paths ["src/web"]
                             :extra-deps  {com.github.mainej/headlessui-reagent {:mvn/version "1.4.1.40"}
                                           dorothy/dorothy                      {:mvn/version "0.0.7"}
@@ -7,7 +10,8 @@
                                           metosin/reitit-frontend              {:mvn/version "0.5.13"}
                                           reagent/reagent                      {:mvn/version "1.1.0"}
                                           thheller/shadow-cljs                 {:mvn/version "2.15.10"}}}
-           :datomic        {:extra-deps {com.datomic/dev-local {:mvn/version "0.9.235"}}}
+           :datomic        {:extra-deps {environ/environ  {:mvn/version "1.2.0"}
+                                         com.datomic/peer {:mvn/version "1.0.7187"}}}
            :cli            {:ns-default schema-voyager.cli}
            :test           {:extra-deps  {lambdaisland/kaocha {:mvn/version "1.0.887"}}
                             :extra-paths ["test"]
